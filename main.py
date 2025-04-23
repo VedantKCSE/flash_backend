@@ -1,18 +1,18 @@
 from fastapi import FastAPI, HTTPException 
-from pydantic import BaseModel
+from pydantic import BaseModel, RootModel
 import json
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Dict, List
-from pydantic import RootModel
 
 load_dotenv()
 
 app = FastAPI()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-# Define a root model where the input is a dictionary like { "topic": [content lines] }
+
+# Root model: dictionary like { "topic": [content lines] }
 class AssessmentRequest(RootModel):
     root: Dict[str, List[str]]
 
@@ -37,7 +37,6 @@ def generate_flashcards(req: FlashcardRequest):
     ]
     Only return valid JSON, nothing else.
     """
-
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -52,15 +51,14 @@ def generate_flashcards(req: FlashcardRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ✅ NEW ENDPOINT: /learn
+# ✅ /learn endpoint
 class LearnRequest(BaseModel):
     topic: str
     num_cards: int = 5
-    bio: str = ""  # Optional field for user's bio
+    bio: str = ""  # Optional
 
 @app.post("/learn")
 def generate_learning_cards(req: LearnRequest):
-    # Construct the prompt
     prompt = f"""
 You are an expert teacher helping a student with the topic "{req.topic}".
 The student has provided their bio: "{req.bio}". Use this information to personalize the learning cards slightly if relevant.
@@ -81,8 +79,6 @@ Return only a valid JSON array of strings like this:
 
 Do NOT include any explanations or additional formatting — only the clean JSON array.
 """
-
-
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -95,7 +91,6 @@ Do NOT include any explanations or additional formatting — only the clean JSON
         if len(cards) > 0 and "Example" not in cards[-1]:
             cards[-1] = f"Example: {req.topic} in practice."
 
-        # Clean up topic for response
         safe_topic = req.topic.strip().lower().replace(" ", "_")
         return {safe_topic: cards}
 
@@ -105,6 +100,7 @@ Do NOT include any explanations or additional formatting — only the clean JSON
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ✅ /assessment endpoint
 @app.post("/assessment")
 def generate_assessment(req: AssessmentRequest):
     try:
@@ -112,15 +108,19 @@ def generate_assessment(req: AssessmentRequest):
         topic, content_lines = next(iter(req.root.items()))
         content = "\n".join(content_lines)
 
-        # Filter out any content that contains "Example" in the last card (if it exists)
+        # Convert back to list in case of previous join
         content_lines = content.split("\n")
-        if content_lines[-1].startswith("Example:"):
-            content_lines = content_lines[:-1]  # Remove the last line which is an example
 
-        # Rejoin content after filtering out the example
+        # Remove example if present
+        if content_lines[-1].startswith("Example:"):
+            content_lines = content_lines[:-1]
+
         filtered_content = "\n".join(content_lines)
 
-        # Create the prompt for generating MCQs
+        # Determine number of questions based on number of statements
+        num_statements = len(content_lines)
+        approx_questions = min(num_statements, 15)
+
         prompt = f"""
 You are a smart assessment generator.
 
@@ -129,7 +129,7 @@ Based on the topic "{topic}" and the following content:
 {filtered_content}
 \"\"\"
 
-Create a multiple-choice quiz with 3-5 questions. Each question must include:
+Create a multiple-choice quiz with approximately {approx_questions} questions. Each question must include:
 - "question": the question text
 - "options": an object with 4 labeled options: "A", "B", "C", and "D"
 - "answer": the correct option label (just "A", "B", "C", or "D")
@@ -154,7 +154,6 @@ Respond only in this valid JSON format:
 Do not include any explanations, context, or markdown. Only return clean JSON.
 """
 
-        # Request the quiz from the OpenAI model
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}]
