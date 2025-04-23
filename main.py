@@ -5,10 +5,27 @@ import os
 from openai import OpenAI
 from dotenv import load_dotenv
 from typing import Dict, List
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
 app = FastAPI()
+
+origins = [
+    "http://localhost:19006",  # Expo Web
+    "http://127.0.0.1:8000",   # FastAPI local
+    "http://192.168.x.x:8000", # Your LAN IP, more on this below
+    "*"  # for testing only
+]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # or ["*"] for testing
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
